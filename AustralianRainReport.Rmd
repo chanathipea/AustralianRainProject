@@ -1,0 +1,1104 @@
+---
+title: "HarvardX: PH125.9x Data Science \n Choose Your Own Project \n Australian Rain Prediction"
+author: "Chanathip Eamdeengamlert"
+date: "5/22/2021"
+output: 
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+\newpage
+# Introduction
+This is a project as a part of the ninth and final course, HarvardX PH125.9x - Data Science: Capstone, in HarvardX's multi-part Data Science Professional Certificate series.
+
+## The Problem Statement 
+In this report, we will try to answer the question that whether or not it will rain tomorrow in Australia. We implement Logistic Regression with Python and Scikit-Learn.
+
+To answer the question, we build a classifier to predict whether or not it will rain tomorrow in Australia. We train a binary classification model using Logistic Regression. I have used the Rain in Australia dataset for this project.
+
+So, let's get started.
+
+## Essential Libraries 
+The first step in building the model is to import the necessary libraries.
+
+```{r RequiredPackage, results='hide', message=FALSE, warning=FALSE}
+# Importing required package
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(lubridate)) install.packages("lubridate", repos = "http://cran.us.r-project.org")
+if(!require(MLeval)) install.packages('MLeval', repos = "http://cran.us.r-project.org")
+if(!require(pROC)) install.packages('pROC', repos = "http://cran.us.r-project.org")
+if(!require(glmnet)) install.packages('glmnet', repos = "http://cran.us.r-project.org")
+if(!require(Rborist)) install.packages('Rborist', repos = "http://cran.us.r-project.org")
+if(!require(xgboost)) install.packages('xgboost', repos = "http://cran.us.r-project.org")
+if(!require(e1071)) install.packages('e1071', repos = "http://cran.us.r-project.org")
+```
+
+## The Dataset 
+The next step is to import the dataset.
+```{r data, results='hide', message=FALSE, warning=FALSE}
+# Importing Data
+url <- "https://raw.githubusercontent.com/chanathipea/AustralianRainProject/main/weatherAUS.csv"
+tmp_filename <- tempfile()
+download.file(url, tmp_filename)
+dat <- read_csv(tmp_filename)
+file.remove(tmp_filename)
+
+ausrain <- as.data.frame(dat)
+```
+
+View dimensions of dataset 
+```{r dimension, message=FALSE, warning=FALSE}
+dim(ausrain)
+```
+
+Preview the dataset
+```{r Preview, message=FALSE, warning=FALSE}
+head(ausrain)
+```
+
+View column names
+```{r column, message=FALSE, warning=FALSE}
+colnames(ausrain)
+```
+
+View summary of dataset
+```{r structure, message=FALSE, warning=FALSE}
+str(ausrain, give.attr = FALSE)
+```
+
+  We can see that the dataset contains mixture of date, character logical and numerical variables. Also, there are some missing values in the dataset.
+
+## Executive Summary
+
+After import and load all required library, data cleansing and data manipulation was done in first step.
+
+The target variable is RainTomorrow. So, firstly, The missing value in Raintomorrow will be removed. Then check the categorical column and convert to categorical type. The column with more 50% of missing value also will be removed.
+
+Missing value is also explored with correlation to other variable. More column is removed since the missing value is affect to other variable such as missing value in pressure column is covered the whole category in location column. The rest of the missing value is removed by row.
+
+Time stamp column is formatted to date-time data type. Month feature were extracted from existing column in order to further explore in exploratory analysis.
+
+Then, exploratory data analysis was done in second step. The continuous variables are explored to see the distribution by target variable and other catagorical variables. The categorical variables are explored by target variable and its ration to target variable.
+
+Insights from EDA has shown that the correlation between continuous variable and target variable is not very significant correlated. By exploring categorical variables, the difference in ration by target variable are noticable but also not very clear separator for target variable.
+
+Since the current predictor is not very correlated and not very separation for target variable, The final approach is to use the ensemble classification algorithm. The logistic regression and normalized logistic regression with be used as the benchmark then random forest and extreme gradient boost will be used as the final model.
+
+The autralian rain data is separated into 80% training set and 20% test set to fit model and test the algorithm. The ROC will be used for evaluation since the target is imbalance date and the objective is focused on predicting both positive condition and negative condition.
+
+Random forest model shown the best performance for this project with all variable in the model.
+
+\newpage
+# Method and Analysis
+
+## Import Library
+
+The first step in building the model is to import the necessary libraries.
+
+```{r library, results='hide', message=FALSE, warning=FALSE}
+library(tidyverse)
+library(caret)
+library(lubridate)
+library(pROC)
+library(MLeval)
+library(glmnet)
+library(Rborist)
+library(xgboost)
+library(e1071)
+library(doParallel)
+```
+
+## Data Manipulation
+
+Firstly, trying to predict raining on tomorrow day.So NA of RainTomorrow will be filtered out.
+  
+```{r filterRainTomorrow}
+# So NA of RainTomorrow will be filtered out.
+ausrain <- ausrain %>% filter(!is.na(RainTomorrow))
+```
+
+  Confirm no incorrect record by seeing the unique value before convert to factor.
+  
+```{r uniqueCat}
+# Confirm no incorrect record by seeing the unique value before convert to factor
+ausrain %>% summarize(Today = unique(RainToday)) %>% as.list(.)
+ausrain %>% summarize(Tomorrow = unique(RainTomorrow)) %>% as.list(.)
+ausrain %>% summarize(WindDir = unique(WindGustDir)) %>% as.list(.)
+ausrain %>% summarize(Wind9am = unique(WindDir9am)) %>% as.list(.)
+ausrain %>% summarize(Wind3pm = unique(WindDir3pm)) %>% as.list(.)
+ausrain %>% summarize(Location = unique(Location)) %>% as.list(.)
+```
+
+  Then convert all character and logical value to factor with specific level.
+
+```{r convertCat}
+ausrain <- ausrain %>% 
+  mutate(RainToday = factor(RainToday, levels = c("Yes", "No")),
+         RainTomorrow = factor(RainTomorrow, levels = c("Yes", "No")),
+         WindGustDir = as.factor(WindGustDir),
+         WindDir9am = as.factor(WindDir9am),
+         WindDir3pm = as.factor(WindDir3pm),
+         Location = as.factor(Location))
+summary(ausrain)
+```
+
+  It seem that some of the column contain more than 30% of NA value such as Evaporation, Sunshine NA, Cloud9am, and Cloud3pm. So, trying to remove those columns from analysis since to impute the value to this much of missing value may deviate the actual observation.
+
+```{r removeMissing}
+ausrain <- ausrain %>% select(-c(Evaporation , Sunshine, Cloud9am, Cloud3pm))
+```
+
+```{r exploreNA}
+# The rest of missing values are explore separately
+nadata <- ausrain %>% mutate(WGD = is.na(WindGustDir),
+                             WGS = is.na(WindGustSpeed),
+                             WD9 = is.na(WindDir9am),
+                             WD3 = is.na(WindDir3pm),
+                             WS9 = is.na(WindSpeed9am),
+                             WS3 = is.na(WindSpeed3pm),
+                             HD9 = is.na(Humidity9am),
+                             HD3 = is.na(Humidity3pm),
+                             P9na = is.na(Pressure9am),
+                             P3na = is.na(Pressure3pm),
+                             T9 = is.na(Temp9am),
+                             T3 = is.na(Temp3pm))
+```
+
+  All variable were explore in the same manor but only 4 significant variables are shown in this report the rest will be contain in the original r script, WindGustDir, WindGustSpeed, Pressure9am and Pressure3pm.
+
+  Whole Newcastle and Albany do not have WindGustDir and WindGustSpeed observation. If we filter out the NA observations in WindGustDir and WindGustSpeed, the whole 2 locations observation will be missing. In order to retain 2 locations, we select to removed those 2 columns.
+  
+```{r exploreWGDWGS, echo=FALSE, fig.align="center",out.width='70%'}
+nadata %>% ggplot(aes(x = Date, y = WGD )) + 
+  geom_point(alpha = 0.5, size = 0.3) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  facet_wrap(~Location) + 
+  labs(title = 'WindGustDir NA value by location')
+nadata %>% ggplot(aes(x = Location, fill = WGD)) +
+  geom_bar(position = 'fill') + 
+  scale_x_discrete(guide = guide_axis(angle = 90)) + 
+  labs(title = 'WindGustDir NA value ratio by location') +
+  theme(legend.position = 'bottom')
+
+nadata %>% ggplot(aes(x = Date, y = WGS)) + 
+  geom_point(alpha = 0.5, size = 0.3) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  facet_wrap(~Location) + 
+  labs(title = 'WindGustSpeed NA value by location')
+nadata %>% ggplot(aes(x = Location, fill = WGS)) +
+  geom_bar(position = 'fill') + 
+  scale_x_discrete(guide = guide_axis(angle = 90)) + 
+  labs(title = 'WindGustSpeed NA value ratio by location') +
+  theme(legend.position = 'bottom')
+```
+
+  Even Pressure9am and Pressure3pm have about 10% of NA value which is a small number.But when looking into MountGinini, Newcastle, Penrith and SalmonGums, they do not have Pressure9am and Pressure3pm observation. If we filter out the NA observations, the whole 4 locations observation will be missing. In order to retain 4 locations, those 2 columns will be removed the same way as WindGustDir and WindGustSpeed.
+
+```{r exploreP9naP3na, echo=FALSE, fig.align="center",out.width='70%'}
+nadata %>% ggplot(aes(x = Date, y = P9na)) + 
+  geom_point(alpha = 0.5, size = 0.3) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  facet_wrap(~Location) + 
+  labs(title = 'Pressure9am NA value by location')
+nadata %>% ggplot(aes(x = Location, fill = P9na)) +
+  geom_bar(position = 'fill') + 
+  scale_x_discrete(guide = guide_axis(angle = 90)) + 
+  labs(title = 'Pressure9am NA value ratio by location') +
+  theme(legend.position = 'bottom')
+
+nadata %>% ggplot(aes(x = Date, y = P3na)) + 
+  geom_point(alpha = 0.5, size = 0.3) +
+  theme(axis.text.x = element_text(angle = 90)) +
+  facet_wrap(~Location) + 
+  labs(title = 'Pressure3pm NA value by location')
+nadata %>% ggplot(aes(x = Location, fill = P3na)) +
+  geom_bar() + scale_x_discrete(guide = guide_axis(angle = 90)) + 
+  labs(title = 'Pressure3pm NA value ratio by location') +
+  theme(legend.position = 'bottom')
+```
+
+As we explore above, 4 variables are removed
+
+```{r removeNA}
+# 4 variables are removed
+ausrain <- ausrain %>% select(-c(Pressure9am, Pressure3pm, WindGustDir, WindGustSpeed))
+ausrain <- ausrain %>% drop_na()
+```
+
+Next, we look into Date variable. We can see that there is a Date variable which is still not very useful for prediction since they are all unique for each column and there will be no repeated date in the future. So, Month data is extracted from Date column to use as predictor in order to see if they are some seasonal effect.
+
+```{r dateColumn}
+# Get month variable
+ausrain <- ausrain %>% mutate(Month = month(Date)) %>% mutate(Month = as.factor(Month))
+```
+
+## Exploratory Data Analysis
+
+  We have imported the data. Now, its time to explore the data to gain insights about it.
+
+### Target Variable Analysis
+
+```{r targetAnalysis, message=FALSE, echo = FALSE, fig.align="center",out.width='70%'}
+ausrain %>% ggplot(aes(x = RainTomorrow, fill = RainTomorrow)) +
+  geom_bar() + 
+  labs(title = 'Number of Yes vs No Raintomorrow') +
+  theme(legend.position = 'bottom')
+```
+
+```{r targetSummary, message=FALSE}
+ausrain %>% group_by(RainTomorrow) %>% summarize(count = n())
+```
+
+  The target variable is RainTomorrow which is  binary categorical variable. The above univariate plot confirms our findings that the No variable have 98746 entries, and the Yes variable have 28287 entries.
+  The target variable is in imbalance since it is more than 3 times difference in target factor levels.
+
+\newpage
+### Predictors Analysis 
+
+  In this section, I segregate the dataset into categorical and numerical variables. There are a mixture of categorical and numerical variables in the dataset. First of all, I will find categorical variables.
+
+### Explore Categorical Variables 
+
+  There are 5 categorical variables. These are given by Location, WindDir9am, WindDir3pm, RainToday and Month. Excluding the target variable, there are one binary categorical predictor variable - RainToday.
+Each categorical variable will be explored by count frequency of each category and compare the ratio between target variable.
+
+  We would like to if there is any difference in ratio between target variable factor, Yes, it will rain tomorrow and No, it will not rain tomorrow, and also difference in ratio between each its own factor levels.
+  
+#### Explore by Location
+
+There is significant difference of rain probability on each Location.
+
+```{r exploreRainTomorrow, message=FALSE, fig.show='hold', out.width='50%', echo = FALSE}
+# Explore by Location
+# There is significant difference of rain probability on each Location  
+ausrain %>% ggplot(aes(x = Location, fill = RainTomorrow)) +
+  geom_bar(position = 'fill') + 
+  scale_x_discrete(guide = guide_axis(angle = 90)) +
+  labs(title = 'Normalized Ratio of RainTomorrow by Location') +
+  theme(legend.position = 'bottom')
+
+ausrain %>% group_by(Location) %>% 
+  summarize(Ytomorrow = sum(RainTomorrow == 'Yes'),
+            Total = n(), Rainratio = Ytomorrow/Total) %>%
+  arrange(Rainratio) %>%
+  ggplot(aes(x = reorder(Location,Rainratio), y = Rainratio)) + 
+  geom_col() + scale_x_discrete(guide = guide_axis(angle = 90)) +
+  labs(title = 'Probability of RainTomorrow by Location') + 
+  xlab('Location')
+```
+
+#### Explore by WindDir9am
+
+The RainTomorrow is also separable by WindDir9am variable. The ratio between Yes and No case of RainTomorrow is show the difference on each WindDir9am factor.
+
+```{r exploreWindDir9am, message=FALSE, fig.show='hold', out.width='50%', echo = FALSE}
+# Explore by WindDir9am
+ausrain %>% ggplot(aes(x = WindDir9am, fill = RainTomorrow)) + 
+  geom_bar(position = 'fill') + 
+  scale_x_discrete(guide = guide_axis(angle = 90)) +
+  labs(title = 'Normalized Ratio of RainTomorrow by WindDir9am') +
+  theme(legend.position = 'bottom')
+
+ausrain %>% group_by(WindDir9am) %>% 
+  summarize(Ytomorrow = sum(RainTomorrow == 'Yes'),
+            Total = n(), Rainratio = Ytomorrow/Total) %>%
+  arrange(Rainratio) %>%
+  ggplot(aes(x = reorder(WindDir9am,Rainratio), y = Rainratio)) + 
+  geom_col() + scale_x_discrete(guide = guide_axis(angle = 90)) +
+  labs(title = 'Probability of RainTomorrow by WindDir9am') + 
+  xlab('WindDirection')
+```
+
+\newpage
+#### Explore by WindDir3pm
+
+The RainTomorrow is also separable by WindDir9am variable, but the difference between each wind direction is quite small.
+
+```{r exploreWindDir3pm, message=FALSE, fig.show='hold', out.width='50%', echo = FALSE}
+# Explore by WindDir3pm
+# small difference between each wind direction
+ausrain %>% ggplot(aes(x = WindDir3pm, fill = RainTomorrow)) + 
+  geom_bar(position = 'fill') + 
+  scale_x_discrete(guide = guide_axis(angle = 90)) +
+  labs(title = 'Normalized Ratio of RainTomorrow by WindDir3pm')  +
+  theme(legend.position = 'bottom')
+
+ausrain %>% group_by(WindDir3pm) %>% 
+  summarize(Ytomorrow = sum(RainTomorrow == 'Yes'),
+            Total = n(), Rainratio = Ytomorrow/Total) %>%
+  arrange(Rainratio) %>%
+  ggplot(aes(x = reorder(WindDir3pm,Rainratio), y = Rainratio)) + 
+  geom_col() + scale_x_discrete(guide = guide_axis(angle = 90)) +
+  labs(title = 'Probability of RainTomorrow by WindDir3pm') + 
+  xlab('WindDirection')
+```
+
+#### Explore by RainToday
+
+The RainTomorrow is also separable by RainToday if today is not raining, but if today is raining a chance of raining tomorrow is 50%.
+
+```{r exploreRainToday, message=FALSE, fig.show='hold', out.width='50%', echo = FALSE}
+# Explore by RainToday
+ausrain %>% ggplot(aes(x = RainToday, fill = RainTomorrow)) + 
+  geom_bar(position = 'fill') +
+  labs(title = 'Normalized Ratio of RainTomorrow by RainToday')  +
+  theme(legend.position = 'bottom')
+
+ausrain %>% group_by(RainToday) %>% 
+  summarize(Ytomorrow = sum(RainTomorrow == 'Yes'),
+            Total = n(), Rainratio = Ytomorrow/Total) %>%
+  arrange(Rainratio) %>%
+  ggplot(aes(x = RainToday, y = Rainratio)) + 
+  geom_col() +
+  labs(title = 'Probability of RainTomorrow if it RainToday') + 
+  xlab('RainToday')
+```
+
+#### Explore by Month
+
+The RainTomorrow is separable by Month variable. The ratio between Yes and No case of RainTomorrow is show the difference on each month.
+
+```{r exploreMonth, message=FALSE, fig.show='hold', out.width='50%', echo = FALSE}
+# Explore by Month
+ausrain %>% ggplot(aes(x = Month, fill = RainTomorrow)) + 
+  geom_bar(position = 'fill') +
+  labs(title = 'Normalized Ratio of RainTomorrow by Month')  +
+  theme(legend.position = 'bottom')
+
+ausrain %>% group_by(Month) %>% 
+  summarize(Ytomorrow = sum(RainTomorrow == 'Yes'),
+            Total = n(), Rainratio = Ytomorrow/Total) %>%
+  arrange(Rainratio) %>%
+  ggplot(aes(x = Month, y = Rainratio)) + 
+  geom_col() +
+  labs(title = 'Probability of Rain by Month') + 
+  xlab('Month')
+```
+
+### Explore Continuous Variables 
+
+There are 9 continuous variables left after data cleansing. These are given by MinTemp, MaxTemp, Rainfall, WindSpeed9am, WindSpeed3pm, Humidity9am, Humidity3pm, Temp9am, and Temp3pm.
+The continuous variables will be visualized by boxplots to check the distribution and compare the distribute between 2 target variable. Further more, some variable will be faceted with other variable to check any significant relationship.
+
+#### Explore Mintemp
+
+There is not a clear difference in mean of Mintemp when compare between 2 class of RainTomorrow. But when classify deeper into each location, there are some distinct relationship such as in AliceSprings, mean mintemp is higher if tomorrow is raining or in Albany, mintemp is lower if tomorrow is raining. Then Mintemp may be use full in the prediction.
+
+```{r exploreMintemp, echo = FALSE, fig.align="center",out.width='70%'}
+# Mintemp (not significant)
+# not clear difference in Mean
+ausrain %>% ggplot(aes(y = MinTemp , x = RainTomorrow)) +
+  geom_boxplot() +
+  labs(title = 'MinTemp comparison between class of target variable')
+
+# separate into each location, mintemp has no clear relationship with tomorrow raining.
+# Such as in AliceSprings, mean mintemp is higher if tomorrow is raining. 
+# In contrast, in Albany, mintemp is lower if tomorrow is raining.
+ausrain %>% ggplot(aes(x = RainTomorrow, y = MinTemp)) + 
+  geom_boxplot()+ facet_wrap(~Location, ncol = 10) +
+  labs(title = 'MinTemp comparison between class of target variable by location')
+```
+
+#### Explore Maxtemp
+
+There is not a clear difference in mean of Maxtemp when compare between 2 class of RainTomorrow. But when classify deeper into each location, there is a common relationship in every location. When there will be rain tomorrow, Maxtemp will be lower.
+
+```{r exploreMaxtemp, echo = FALSE, fig.align="center",out.width='70%'}
+# Maxtemp (there is some difference in mean even not very significant)
+ausrain %>% ggplot(aes(y = MaxTemp , x = RainTomorrow)) +
+  geom_boxplot() +
+  labs(title = 'MaxTemp comparison between class of target variable')
+
+# At least all location have a lower Maxtemp if it is raining tomorrow.
+ausrain %>% ggplot(aes(x = RainTomorrow, y = MaxTemp)) + 
+  geom_boxplot()+ facet_wrap(~Location, ncol = 10) +
+  labs(title = 'MaxTemp comparison between class of target variable by location')
+```
+
+\newpage
+#### Explore Windspeed9am
+
+There is not a clear difference in mean of Windspeed9am when compare between 2 class of RainTomorrow.
+
+```{r exploreWindspeed9, echo = FALSE, fig.align="center",out.width='70%'}
+# Explore by WindSpeed9am (Not significant)
+ausrain %>% ggplot(aes(x = RainTomorrow, y = WindSpeed9am)) + 
+  geom_boxplot() +
+  labs(title = 'Windspeed9am comparison between class of target variable')
+
+ausrain %>% ggplot(aes(x = RainTomorrow, y = WindSpeed9am)) + 
+  geom_boxplot()+ facet_wrap(~Location, ncol = 10) +
+  labs(title = 'Windspeed9am comparison between class of target variable by location')
+```
+
+\newpage
+#### Explore Windspeed3pm
+
+There is not a clear difference in mean of Windspeed3pm when compare between 2 class of RainTomorrow.
+
+```{r exploreWindspeed3, echo = FALSE, fig.align="center",out.width='70%'}
+## Explore by WindSpeed3pm (Not significant)
+ausrain %>% ggplot(aes(x = RainTomorrow, y = WindSpeed3pm)) + 
+  geom_boxplot() +
+  labs(title = 'Windspeed3pm comparison between class of target variable')
+
+ausrain %>% ggplot(aes(x = RainTomorrow, y = WindSpeed3pm)) + 
+  geom_boxplot()+ facet_wrap(~Location, ncol = 10) +
+  labs(title = 'Windspeed3pm comparison between class of target variable by location')
+```
+
+\newpage
+#### Explore Humidity9am
+
+There is quite significant difference in mean of Humidity9am when compare between 2 class of RainTomorrow. it is actually explore deeply into each variable such as Location, Month and Raintoday variable. Those will not shows in this report to keep this report not to long but the comparison shows similar relationship.
+
+```{r exploreHumid9-1, echo = FALSE, fig.align="center",out.width='70%'}
+## Explore by Humidity9am (Selected)
+ausrain %>% ggplot(aes(x = RainTomorrow, y = Humidity9am)) + 
+  geom_boxplot() +
+  labs(title = 'Humidity9am comparison between class of target variable')
+```
+
+```{r exploreHumid9-2,message=FALSE, fig.show='hold', out.width='50%', echo = FALSE}
+ausrain %>% ggplot(aes(x = RainTomorrow, y = Humidity9am)) + 
+  geom_boxplot()+ facet_wrap(~RainToday)
+
+ausrain %>% ggplot(aes(x = RainTomorrow, y = Humidity9am)) + 
+  geom_boxplot()+ facet_wrap(~Month)
+```
+
+\newpage
+#### Explore Humidity3pm
+
+Humidity3pm even show more significant difference in mean of Humidity9am when compare between 2 class of RainTomorrow.
+
+```{r exploreHumid3, echo = FALSE, fig.align="center",out.width='70%'}
+## Explore by Humidity3pm (Selected)
+ausrain %>% ggplot(aes(x = RainTomorrow, y = Humidity3pm)) + 
+  geom_boxplot() +
+  labs(title = 'Humidity3pm comparison between class of target variable')
+
+ausrain %>% ggplot(aes(x = RainTomorrow, y = Humidity3pm)) + 
+  geom_boxplot()+ facet_wrap(~Location, ncol = 10) +
+  labs(title = 'Humidity3pm comparison between class of target variable by location')
+```
+
+\newpage
+#### Explore Temp9am
+
+There is not a clear difference in mean of Temp9am when compare between 2 class of RainTomorrow. But when classify deeper into each location, there are some distinct relationship such as in Albany, Dartmoor, Ballarat and Walpole, mean Temp9am is lower if tomorrow is raining .
+
+```{r exploreTemp9, echo = FALSE, fig.align="center",out.width='70%'}
+## Explore by Temp9am (not significant)
+ausrain %>% ggplot(aes(x = RainTomorrow, y = Temp9am)) + 
+  geom_boxplot() +
+  labs(title = 'Temp9am comparison between class of target variable')
+
+ausrain %>% ggplot(aes(x = RainTomorrow, y = Temp9am)) + 
+  geom_boxplot()+ facet_wrap(~Location, ncol = 10) +
+  labs(title = 'Temp9am comparison between class of target variable by location')
+```
+
+\newpage
+#### Explore Temp3pm
+
+There is quite significant difference in mean of Temp3pm when compare between 2 class of RainTomorrow.
+
+```{r exploreTemp3, echo = FALSE, fig.align="center",out.width='70%'}
+## Explore by Temp3pm (Selected)
+ausrain %>% ggplot(aes(x = RainTomorrow, y = Temp3pm)) + 
+  geom_boxplot() +
+  labs(title = 'Temp3pm comparison between class of target variable')
+
+ausrain %>% ggplot(aes(x = RainTomorrow, y = Temp3pm)) + 
+  geom_boxplot()+ facet_wrap(~Location, ncol = 10) +
+  labs(title = 'Temp3pm comparison between class of target variable by location')
+``` 
+
+\newpage
+#### Explore Rainfall
+
+Rainfall variable is full of outlier since when it is no rain the data will be close to zero but when it rain the data can goes up to 200. With is kind of data, the visualization may not shows much of the information but i decide to keep this variable because it is the actual data with the extreme difference.
+
+```{r exploreRainfall, echo = FALSE, fig.align="center",out.width='70%'}
+# Rainfall (should not be used)
+ausrain %>% ggplot(aes(y = Rainfall , x = RainTomorrow)) +
+  geom_boxplot() +
+  labs(title = 'Rainfall comparison between class of target variable')
+```
+Remark
+On closer inspection, we can see that the Rainfall, Evaporation, WindSpeed9am and WindSpeed3pm columns may contain some outliers. But it is not really a bad data outlier, it is actually a true data which may help in classification so it is decided not to filter it out.
+
+## Modeling approach
+
+Since the current predictor is not very correlated and not very good separation for target variable, The final approach is to use the ensemble classification algorithm. Both bagging and boosting algorithm will be used in this project to compare the performance. The logistic regression and normalized logistic regression with be used as the benchmark then random forest and extreme gradient boost will be used as the final model.
+
+The australian rain data is separated into 80% training set and 20% test set to fit model and test the algorithm. The ROC will be used for evaluation since the target is imbalance date and the objective is focused on predicting both positive condition and negative condition.
+
+### Train Test Split
+We will divide the dataset into training (80%) and test (20%) sets respectively to train the rainfall prediction model:
+
+```{r doParallel, echo=FALSE}
+cl <- makePSOCKcluster(detectCores())
+registerDoParallel(cl)
+```
+
+```{r setSeed, message=FALSE, warning=FALSE}
+set.seed(1, sample.kind = 'Rounding')
+```
+
+```{r trainTestSplit, message=FALSE, warning=FALSE}
+TrainIndex <- createDataPartition(ausrain$RainTomorrow, times = 1, p = 0.80, list = FALSE)
+Trainset <- ausrain[TrainIndex,]
+Testset <- ausrain[-TrainIndex,]
+```
+
+### Model Improvement and Evaluation Method
+Several techniques are employed to improve the model performance. k-fold cross validation and hyperparameter optimization using GridSearchCV are used in this project. Train control parameter is set.
+
+The ROC will be used for evaluation since the target is imbalance date and the objective is focused on predicting both positive condition and negative condition. Twoclasssummary method is set in train control in order to get the probability result and ROC_AUC
+```{r trainControl}
+TrainCon <- trainControl(method = "cv", 
+                         number = 5, 
+                         search = 'grid',
+                         summaryFunction = twoClassSummary,
+                         classProbs = TRUE,
+                         savePredictions = TRUE)
+```
+
+The importance function is manually define to show to importance of each variable without separated into every factor level as varimp function did.
+
+```{r varimpFunction}
+## Initiate variable importance function.
+importance <- function(a){
+  df <- as.data.frame(a)
+  df <- df %>% mutate(name = rownames(df)) 
+  df1 <- df %>% 
+    mutate(name = ifelse(str_detect(df$name, "^Location"), 'Location', name),
+           name = ifelse(str_detect(df$name, "^WindDir3pm"), 'WindDir3pm', name),
+           name = ifelse(str_detect(df$name, "^WindDir9am"), 'WindDir9am', name),
+           name = ifelse(str_detect(df$name, "^Month"), 'Month', name),
+           name = ifelse(str_detect(df$name, "^RainToday"), 'RainToday', name))
+  df1 <- df1 %>% group_by(name) %>% 
+    summarize(importance = sum(Overall)) %>% 
+    arrange(desc(importance))
+  return(df1)
+}
+```
+
+### Training Rainfall Prediction Model with Different Models
+
+### Logistic Regression
+
+Normal logistic regression is used as base line model to see the prediction performance of the variable.
+
+```{r trainGLM, message=FALSE, warning=FALSE}
+# GLM 
+fitGLM <- train(RainTomorrow ~ .,
+               data = Trainset %>% select(-Date),
+               method = "glm",
+               trControl = TrainCon)
+```
+
+```{r fitGLM, message=FALSE, warning=FALSE}
+fitGLM
+```
+
+```{r confGLM, message=FALSE, warning=FALSE}
+confusionMatrix(fitGLM, norm = 'none')
+```
+
+Even the accuracy is high but sensitivity is quite low since the data set is imbalance. So, twoclasssummary and ROC_AUC is used because of this imbalance issue.
+
+```{r varimpGLM, message=FALSE, warning=FALSE, fig.align="center",out.width='70%'}
+# GLM varImp
+varImpGLM <- varImp(fitGLM, scale = FALSE)
+importance(varImpGLM$importance) %>% 
+  ggplot(aes(x = reorder(name, -importance), y = importance)) + 
+  geom_col() + 
+  scale_x_discrete(guide = guide_axis(angle = 90)) +
+  labs(title = 'Variable importance from Logistic Regression') +
+  xlab(NULL)
+```
+
+```{r predGLM, message=FALSE, warning=FALSE}
+# GLM testset prediction
+predGLM <- predict(fitGLM, Testset)
+postResample(pred = predGLM, obs = Testset$RainTomorrow)
+confusionMatrix(data = predGLM, reference = Testset$RainTomorrow, positive = 'Yes')
+```
+
+It is confirmed with test set that the result of model accuracy is high but the sensitivity is very low because the negative class is so much more than positive class.
+
+The ROC_AUC is used to evaluate the model performance instead of accuracy.
+
+```{r rocGLM, message=FALSE, warning=FALSE, fig.align="center",out.width='70%'}
+# GLM ROC trainset prediction
+roctrainGLM <- roc(response = fitGLM$pred[,'obs'],
+                    predictor = fitGLM$pred[,'Yes'])
+plot(roctrainGLM, print.thres = 'best')
+```
+
+```{r rocAUCGLM, message=FALSE, warning=FALSE}
+auctrainGLM <- auc(roctrainGLM)
+print(auctrainGLM)
+```
+
+```{r rocThresGLM, message=FALSE, warning=FALSE}
+thresholdGLM = coords(roctrainGLM, "best")[1,'threshold']
+print(thresholdGLM)
+```
+From the ROC above, the best threshold to get the best sensitivity while still high specificity is `r thresholdGLM`.
+
+To confirm the performance, the threshold is selected and used to predict the testset again. Now, the 'type' argument is set to 'prob' to get the probability prediction of both Yes and No class. If the probability of positive class is higher than the selected threshold, the prediction will be Yes.
+
+```{r probPredGLM, message=FALSE, warning=FALSE}
+# GLM ROC testset prediction
+probtestGLM <- predict(fitGLM, Testset, type = 'prob')
+head(probtestGLM)
+```
+
+```{r rocPredGLM, message=FALSE, warning=FALSE, fig.align="center",out.width='70%'}
+roctestGLM <- roc(response = Testset$RainTomorrow,
+                     predictor = probtestGLM[, "Yes"],
+                     levels = rev(levels(Testset$RainTomorrow)))
+plot(roctestGLM, print.thres = 'best')
+
+auc(roctestGLM)
+```
+
+ROC for testset is shown above. The best threshold is quite similar to the selected threshold from trainset. This shows that the model is fitted quite well to both trainset and testset.
+
+```{r rocConfGLM, message=FALSE, warning=FALSE}
+predtestGLM <- as.factor(ifelse(probtestGLM["Yes"] >= thresholdGLM, 'Yes', 'No'))
+confMatGLM <- confusionMatrix(data = predtestGLM, reference = Testset$RainTomorrow, positive = 'Yes')
+print(confMatGLM)
+```
+
+The confusion matrix above shows that when compare with standard evaluation, when select the best ROC threshold, the model can predict more positive class which is good for weather forecast even the overall accuracy is lower.
+
+```{r aucGLM, message=FALSE, warning=FALSE}
+auctestGLM <- auc(roctestGLM)
+print(auctestGLM)
+```
+
+The final AUC is `r auctestGLM` from logistic regression model.
+
+```{r resultGLM, message=FALSE, warning=FALSE}
+result <- data_frame(Model = 'Logistic Regression', 
+                     TestAUC = auctestGLM,
+                     TrainAUC = auctrainGLM,
+                     Sensitivity = confMatGLM$byClass['Sensitivity'], 
+                     Specificity = confMatGLM$byClass['Specificity'],
+                     Accuracy = confMatGLM$overall['Accuracy'])
+result %>% knitr::kable()
+```
+
+The rest of the model in this report will be run in the same pattern. The final performance and result will be shown and discuss in the Result section.
+
+### Regularized Logistic Regression
+
+Next, try to do regularized logistic regression to see is there any preformance improvement. First is to initiate the tuning grid with alpha to (0 and 1) and sequence of lambda from 0 to 1 by 0.2 each step.
+```{r tuneGLMNET, message=FALSE, warning=FALSE}
+### GLMNET
+tuneGridGLMNET <- expand.grid(alpha = c(seq(0,1,0.2)),
+                        lambda = c(seq(0,1,0.2)))
+```
+
+Fit the model with specified tuning grid and train control.
+```{r trainGLMNET, message=FALSE, warning=FALSE}
+fitGLMNET <- train(RainTomorrow ~ .,
+                data = Trainset %>% select(-Date),
+                method = "glmnet",
+                trControl = TrainCon,
+                tuneGrid = tuneGridGLMNET,
+                family = 'binomial')
+```
+
+Best tune model hyperparameter is shown below
+
+```{r fitGLMNET, message=FALSE, warning=FALSE, fig.align="center",out.width='70%'}
+knitr::kable(fitGLMNET$bestTune)
+plot(fitGLMNET)
+```
+
+```{r confGLMNET, message=FALSE, warning=FALSE}
+confusionMatrix(fitGLMNET, norm = 'none')
+```
+
+Similar to normal logistic regression, the accuracy is high but sensitivity is quite low since the data set is imbalance. So, twoclasssummary and ROC_AUC is used because of this imbalance issue.
+
+```{r varimpGLMNET, message=FALSE, warning=FALSE, fig.align="center",out.width='70%'}
+# GLMNET varImp
+varImpGLMNET <- varImp(fitGLMNET, scale = FALSE)
+importance(varImpGLMNET$importance) %>% 
+  ggplot(aes(x = reorder(name, -importance), y = importance)) + 
+  geom_col() +
+  scale_x_discrete(guide = guide_axis(angle = 90)) +
+  labs(title = 'Variable importance from Regularized Logistic Regression') +
+  xlab(NULL)
+```
+
+```{r predGLMNET, message=FALSE, warning=FALSE}
+# GLMNET testset prediction
+predGLMNET <- predict(fitGLMNET, Testset)
+postResample(pred = predGLMNET, obs = Testset$RainTomorrow)
+confusionMatrix(data = predGLMNET, reference = Testset$RainTomorrow, positive = 'Yes')
+```
+
+It is confirmed with test set that the sensitivity is very low because the negative class is so much more than positive class.
+
+The ROC_AUC is used to evaluate the model performance instead of accuracy.
+
+```{r rocGLMNET, message=FALSE, warning=FALSE, fig.align="center",out.width='70%'}
+# GLMNET ROC
+# GLMNET ROC trainset prediction
+roctrainGLMNET <- roc(response = fitGLMNET$pred[,'obs'],
+                      predictor = fitGLMNET$pred[,'Yes'])
+plot(roctrainGLMNET, print.thres = 'best')
+```
+
+```{r rocAUCGLMNET, message=FALSE, warning=FALSE}
+auctrainGLMNET <- auc(roctrainGLM)
+print(auctrainGLMNET)
+```
+
+```{r rocThresGLMNET, message=FALSE, warning=FALSE}
+thresholdGLMNET = coords(roctrainGLMNET, "best")[1,'threshold']
+print(thresholdGLMNET)
+```
+From the ROC above, the best threshold to get the best sensitivity while still high specificity is `r thresholdGLMNET`.
+
+To confirm the performance, the threshold is selected and used to predict the testset again. Now, the 'type' argument is set to 'prob' to get the probability prediction of both Yes and No class. If the probability of positive class is higher than the selected threshold, the prediction will be Yes.
+
+```{r probPredGLMNET, message=FALSE, warning=FALSE}
+# GLMNET ROC testset prediction
+probtestGLMNET <- predict(fitGLMNET, Testset, type = 'prob')
+head(probtestGLMNET)
+```
+
+```{r rocPredGLMNET, message=FALSE, warning=FALSE, fig.align="center",out.width='70%'}
+roctestGLMNET <- roc(response = Testset$RainTomorrow,
+                 predictor = probtestGLMNET[, "Yes"],
+                 levels = rev(levels(Testset$RainTomorrow)))
+plot(roctestGLMNET, print.thres = 'best')
+```
+
+ROC for testset is shown above. The best threshold is quite similar to the selected threshold from trainset. This shows that the model is fitted quite well to both trainset and testset.
+
+```{r rocConfGLMNET, message=FALSE, warning=FALSE}
+predtestGLMNET <- as.factor(ifelse(probtestGLMNET["Yes"] >= thresholdGLMNET, 'Yes', 'No'))
+confMatGLMNET <- confusionMatrix(data = predtestGLMNET, reference = Testset$RainTomorrow, positive = 'Yes')
+print(confMatGLMNET)
+```
+
+The confusion matrix above shows that when compare with standard evaluation, when select the best ROC threshold, the model can predict more positive class which is good for weather forecast even the overall accuracy is lower.
+
+```{r aucGLMNET, message=FALSE, warning=FALSE}
+auctestGLMNET <- auc(roctestGLMNET)
+print(auctestGLMNET)
+```
+The final AUC is `r auctestGLMNET` from regularized logistic regression model.
+
+```{r resultGLMNET, message=FALSE, warning=FALSE}
+result <- rbind(result, data.frame(Model = 'Regularized Logistic Regression',
+                                   TestAUC = auctestGLMNET,
+                                   TrainAUC = auctrainGLMNET,
+                                   Sensitivity = confMatGLMNET$byClass['Sensitivity'],
+                                   Specificity = confMatGLMNET$byClass['Specificity'],
+                                   Accuracy = confMatGLMNET$overall['Accuracy']))
+rownames(result) <- NULL
+result %>% knitr::kable()
+```
+
+### Random Forest (Bagging)
+
+Next, try to use bagging algorithm in this case random forest to see is there any preformance improvement use method Rborist. The tuning parameter, predFixed, is set to 2, 3, and 4. The number of tree is set to 500.
+
+```{r tuneRF, message=FALSE, warning=FALSE}
+tuneGridRF <- expand.grid(minNode = c(1,5), predFixed = c(2,3,4))
+```
+
+```{r trainRF, message=FALSE, warning=FALSE}
+# Random Forest
+fitRF <- train(RainTomorrow ~ .,
+               data = Trainset %>% select(-Date),
+               method = "Rborist",
+               importance=TRUE,
+               nTree = 500,
+               tunegrid = tuneGridRF,
+               trControl = TrainCon)
+```
+
+Best tune model hyperparameter is shown below.
+
+```{r fitRF, message=FALSE, warning=FALSE, fig.align="center",out.width='70%'}
+knitr::kable(fitRF$bestTune)
+plot(fitRF)
+```
+
+```{r confRF, message=FALSE, warning=FALSE}
+confusionMatrix(fitRF, norm = 'none')
+```
+
+With random forest algorithm, the accuracy is still high with low sensitivity from imbalance the target variable. So, twoclasssummary and ROC_AUC is used because of this imbalance issue.
+
+```{r varimpRF, message=FALSE, warning=FALSE, fig.align="center",out.width='70%'}
+# RF varImp
+varImpRF <- varImp(fitRF, scale = FALSE)
+importance(varImpRF$importance) %>% 
+  ggplot(aes(x = reorder(name, -importance), y = importance)) + 
+  geom_col() +
+  scale_x_discrete(guide = guide_axis(angle = 90)) +
+  labs(title = 'Variable importance from Random Forest') +
+  xlab(NULL)
+```
+
+```{r predRF, message=FALSE, warning=FALSE}
+# RF testset prediction
+predRF <- predict(fitRF, Testset)
+postResample(pred = predRF, obs = Testset$RainTomorrow)
+confusionMatrix(data = predRF, reference = Testset$RainTomorrow, positive = 'Yes')
+```
+
+It is confirmed with test set that the sensitivity is very low because the negative class is so much more than positive class.
+
+The ROC_AUC is used to evaluate the model performance instead of accuracy.
+
+```{r rocRF, message=FALSE, warning=FALSE, fig.align="center",out.width='70%'}
+# RF ROC trainset prediction
+roctrainRF <- roc(response = fitRF$pred[,'obs'],
+                  predictor = fitRF$pred[,'Yes'],
+                  levels = rev(levels(Trainset$RainTomorrow)))
+plot(roctrainRF, print.thres = 'best')
+```
+
+```{r rocAUCRF, message=FALSE, warning=FALSE}
+auctrainRF <- auc(roctrainRF)
+print(auctrainRF)
+```
+
+```{r rocThresRF, message=FALSE, warning=FALSE}
+thresholdRF = coords(roctrainRF, "best")[1,'threshold']
+print(thresholdRF)
+```
+
+From the ROC above, the best threshold to get the best sensitivity while still high specificity is `r thresholdRF`.
+
+To confirm the performance, the threshold is selected and used to predict the testset again. Now, the 'type' argument is set to 'prob' to get the probability prediction of both Yes and No class. If the probability of positive class is higher than the selected threshold, the prediction will be Yes.
+
+```{r probPredRF, message=FALSE, warning=FALSE}
+# RF ROC testset prediction
+probtestRF <- predict(fitRF, Testset, type = 'prob')
+head(probtestRF)
+```
+
+```{r rocPredRF, message=FALSE, warning=FALSE, fig.align="center",out.width='70%'}
+roctestRF <- roc(response = Testset$RainTomorrow,
+                 predictor = probtestRF[, "Yes"],
+                 levels = rev(levels(Testset$RainTomorrow)))
+plot(roctestRF, print.thres = 'best')
+```
+
+ROC for testset is shown above. The best threshold is quite similar to the selected threshold from trainset. This shows that the model is fitted quite well to both trainset and testset.
+
+```{r rocConfRF, message=FALSE, warning=FALSE}
+predtestRF <- as.factor(ifelse(probtestRF["Yes"] >= thresholdRF, 'Yes', 'No'))
+confMatRF <- confusionMatrix(data = predtestRF, reference = Testset$RainTomorrow, positive = 'Yes')
+print(confMatRF)
+```
+
+The confusion matrix above shows that when compare with standard evaluation, when select the best ROC threshold, the model can predict more positive class which is good for weather forecast even the overall accuracy is lower.
+
+```{r aucRF, message=FALSE, warning=FALSE}
+auctestRF <- auc(roctestRF)
+print(auctestRF)
+```
+
+The final AUC is `r auctestRF` from regularized logistic regression model.
+
+```{r resultRF, message=FALSE, warning=FALSE}
+result <- rbind(result, data.frame(Model = 'Random Forest',
+                                   TestAUC = auctestRF,
+                                   TrainAUC = auctrainRF,
+                                   Sensitivity = confMatRF$byClass['Sensitivity'],
+                                   Specificity = confMatRF$byClass['Specificity'],
+                                   Accuracy = confMatRF$overall['Accuracy']))
+rownames(result) <- NULL
+result %>% knitr::kable()
+```
+
+### Extreme Gradient Boosting (Boosting)
+Last, boosting algorithm in this case extreme gradient boosting is selected to see is there any preformance improvement. 
+
+the xgbTree method has many hyperparameter for tuning. Only eta, gamma and colsample_bytree are tune in this project. Nround is set to 100 and the rest is remain default. 
+```{r tuneXGB, message=FALSE, warning=FALSE}
+# XGBoost
+tuneGridXGB <- expand.grid(
+  nrounds = 100,
+  max_depth = 6,
+  eta = c(0.1, 0.3, 0.5),
+  gamma = c(0, 10, 30, 50),
+  colsample_bytree = c(0.1,0.3,0.5,0.7,1),
+  min_child_weight = 1,
+  subsample = 1
+)
+```
+
+```{r trainXGB, message=FALSE, warning=FALSE}
+fitXGB <- train(RainTomorrow ~ .,
+                data = Trainset,
+                trControl = TrainCon,
+                tuneGrid = tuneGridXGB,
+                method = "xgbTree",
+                verbose = TRUE
+)
+```
+
+Best tune model hyperparameter is shown below.
+
+```{r fitXGB, message=FALSE, warning=FALSE, fig.align="center",out.width='70%'}
+knitr::kable(fitXGB$bestTune)
+plot(fitXGB)
+```
+
+```{r confXGB, message=FALSE, warning=FALSE}
+confusionMatrix(fitXGB, norm = 'none')
+```
+
+With extreme gradient boosting algorithm, the accuracy is also high with low sensitivity from imbalance the target variable. So, twoclasssummary and ROC_AUC is used because of this imbalance issue.
+
+```{r varimpXGB, message=FALSE, warning=FALSE, fig.align="center",out.width='70%'}
+# XGB varImp
+varImpXGB <- varImp(fitXGB, scale = FALSE)
+importance(varImpXGB$importance) %>% 
+  ggplot(aes(x = reorder(name, -importance), y = importance)) + 
+  geom_col()+
+  scale_x_discrete(guide = guide_axis(angle = 90)) +
+  labs(title = 'Variable importance from Extreme Gradient Boosting') +
+  xlab(NULL)
+```
+
+```{r predXGB, message=FALSE, warning=FALSE}
+# XGB testset prediction
+predXGB <- predict(fitXGB, Testset)
+postResample(pred = predXGB, obs = Testset$RainTomorrow)
+confusionMatrix(data = predXGB, reference = Testset$RainTomorrow, positive = 'Yes')
+```
+
+It is confirmed with test set that the sensitivity is very low because the negative class is so much more than positive class.
+
+The ROC_AUC is used to evaluate the model performance instead of accuracy.
+
+```{r rocXGB, message=FALSE, warning=FALSE, fig.align="center",out.width='70%'}
+## XGB ROC
+# XGB ROC trainset prediction
+roctrainXGB <- roc(response = fitXGB$pred[,'obs'],
+                  predictor = fitXGB$pred[,'Yes'],
+                  levels = rev(levels(Trainset$RainTomorrow)))
+plot(roctrainXGB, print.thres = 'best')
+```
+
+```{r rocAUCXGB, message=FALSE, warning=FALSE}
+auctrainXGB <- auc(roctrainXGB)
+print(auctrainXGB)
+```
+
+```{r rocThresXGB, message=FALSE, warning=FALSE}
+thresholdXGB = coords(roctrainXGB, "best")[1,'threshold']
+print(thresholdXGB)
+```
+
+From the ROC above, the best threshold to get the best sensitivity while still high specificity is `r thresholdXGB`.
+
+To confirm the performance, the threshold is selected and used to predict the testset again. Now, the 'type' argument is set to 'prob' to get the probability prediction of both Yes and No class. If the probability of positive class is higher than the selected threshold, the prediction will be Yes.
+
+```{r probPredXGB, message=FALSE, warning=FALSE}
+# XGB ROC testset prediction
+probtestXGB <- predict(fitXGB, Testset, type = 'prob')
+head(probtestXGB)
+```
+
+```{r rocPredXGB, message=FALSE, warning=FALSE, fig.align="center",out.width='70%'}
+roctestXGB <- roc(response = Testset$RainTomorrow,
+                 predictor = probtestXGB[, "Yes"],
+                 levels = rev(levels(Testset$RainTomorrow)))
+plot(roctestXGB, print.thres = 'best')
+```
+
+ROC for testset is shown above. The best threshold is quite similar to the selected threshold from trainset. This shows that the model is fitted quite well to both trainset and testset.
+
+```{r rocConfXGB, message=FALSE, warning=FALSE}
+predtestXGB <- as.factor(ifelse(probtestXGB["Yes"] >= thresholdXGB, 'Yes', 'No'))
+confMatXGB <- confusionMatrix(data = predtestXGB, reference = Testset$RainTomorrow, positive = 'Yes')
+print(confMatXGB)
+```
+
+The confusion matrix above shows that when compare with standard evaluation, when select the best ROC threshold, the model can predict more positive class which is good for weather forecast even the overall accuracy is lower.
+
+```{r aucXGB, message=FALSE, warning=FALSE}
+auctestXGB <- auc(roctestXGB)
+print(auctestXGB)
+```
+
+The final AUC is `r auctestXGB` for Extreme Gradient Boosting algorithm.
+
+```{r resultXGB, message=FALSE, warning=FALSE}
+result <- rbind(result, data.frame(Model = 'Extreme Gradient Boosting',
+                                   TestAUC = auctestXGB,
+                                   TrainAUC = auctrainXGB,
+                                   Sensitivity = confMatXGB$byClass['Sensitivity'],
+                                   Specificity = confMatXGB$byClass['Specificity'],
+                                   Accuracy = confMatXGB$overall['Accuracy']))
+rownames(result) <- NULL
+result %>% knitr::kable()
+```
+
+```{r resetgc, message=FALSE, warning=FALSE, echo = FALSE}
+registerDoSEQ()
+stopCluster(cl)
+gc(reset = TRUE)
+```
+
+# Results
+
+```{r overallResult}
+result %>% knitr::kable()
+```
+
+The best model is Extreme Gradient Boosting model. Random forest model also have a very good performance . But when compare between train set and test set performance, random forest model is underfitting. If we select this underfitting model, the testset or future actual data prediction performance will be not reliable. Baseline model logistic regression is the poorest performance. Regularized logistic regression is quite interesting since the performance is very similar to baseline model which will be discussed in conclusion section.
+
+# Conclusion 
+The best performance model is Extreme GRadient Boosting model which is boosting algorithm with the best AUC score.
+
+### Ensemble Algorithm
+Since the data shows very low significant and correlation with the target variable, RainTomorrow, the ensemble algorithm works better when compare to single decision algorithm, in this case logistic regression.
+
+### ROC_AUC Score
+When explore the target variable, RainTomorrow, we see a small number of observation that there will be rain tomorrow. Majority of observations is no rain tomorrow. This is a kind of imbalance data which will affect to the our true prediction performance. 
+
+Since most of the time it will be no rain tomorrow, even if the model predict all observation to no rain tomorrow we still get high accuracy score. But when explore deeply into the prediction, the performance when predicting rain tomorrow is very low as it shows in low sensitivity score. That is why the ROC_AUC score is used for evaluate and compare the performance of each model, to get the best prediction performance for both positive and negative case while the data is imbalance.
+
+### Bagging or Boosting
+When focus on ensemble algorithm, both bagging and boosting algorithm is used in this project. Both bagging and boosting algorithm are trying to increasing the overall performance but in different way. 
+
+The bagging algorithm, in this project is random forest, in general, is trying to improve overall performance by voting the result from different decision tree. In general, bagging algorithm help generalized the model, reduce the overfitting of training model.
+
+On the other hand, boosting algorithm, in this project is extreme gradient boosting, is trying to improve overall performance by stacking up the previous decision tree with weighting to create next decision tree. It is focusing on reducing error between the prediction and actual data. In some case this may causing overfitting of the train model
+
+From baseline model, logistic regression, there is no sign of overfitting and it is confirmed by result of regularized logistic regression which is no improvement from normal logistic regression. When random forest is fit to the data, we even see a sign of underfitting since the train dataset performance is quite low when compare to its performance on test dataset. But when extreme gradient boosting help reducing bias or error of the prediction, so the best model performance in this project is extreme gradient boosting.
+
+
+### Improvement
+Finally, the final performance in this project still not the best since the time and computing performance is limited. There still a lot of room for improvement.
+Since the original variable correlation is quite low to target variable, to use more data or gather more variable may help improve the overall prediction performance.
+Deeper data exploration to get more insight of the dataset and it will be useful for more feature engineering.
+To do more cross validation and adjust more tuning parameter may help reducing the overfitting for boosting algorithm.
+
+This is a project as a part of the ninth and final course, HarvardX PH125.9x - Data Science: Capstone, in HarvardX's multi-part Data Science Professional Certificate series. This project helps me for more understanding of data science workflow and technical method. It is inspired me for dig deep into the data science world. And i hope this report will inspired other who read this report also.
