@@ -546,9 +546,6 @@ print(auctrainGLM)
 
 thresholdGLM = coords(roctrainGLM, "best")[1,'threshold']
 
-predtrainGLM <- as.factor(ifelse(probtrainGLM["Yes"] >= thresholdGLM, 'Yes', 'No'))
-confusionMatrix(data = predtrainGLM, reference = Trainset$RainTomorrow, positive = 'Yes')
-
 # GLM ROC testset prediction
 probtestGLM <- predict(fitGLM, Testset, type = 'prob')
 head(probtestGLM)
